@@ -246,53 +246,53 @@
     const BACKUP_FOLDER = "backups";
 
     async function saveBackupToGitHub() {
-        if (!githubToken) { alert("❌ Сначала сохраните GitHub токен"); return; }
-        const backupData = {
-            chatHistory: appMemory.rawHistory,
-            gdd: gddText,
-            chatLog: appMemory.chatLog,
-            timestamp: new Date().toISOString(),
-            version: "0.5"
-        };
-        const jsonStr = JSON.stringify(backupData, null, 2);
-        const rawFilename = `backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-	const filename = encodeURIComponent(rawFilename);
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${filename}`;
-        
+    if (!githubToken) { alert("❌ Сначала сохраните GitHub токен"); return; }
+    
+    const backupData = {
+        chatHistory: appMemory.rawHistory,
+        gdd: gddText,
+        chatLog: appMemory.chatLog,
+        timestamp: new Date().toISOString(),
+        version: "0.5"
+    };
+    const jsonStr = JSON.stringify(backupData, null, 2);
+    const filename = "memory.json"; // ← ТВОЁ ИМЯ ФАЙЛА
+    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${filename}`;
+    
+    try {
+        // Получаем SHA существующего файла (если он есть)
+        let sha = null;
         try {
-            // Получаем SHA, если файл уже существует (маловероятно, но на всякий случай)
-            let sha = null;
-            try {
-                const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-                if (checkRes.ok) {
-                    const data = await checkRes.json();
-                    sha = data.sha;
-                }
-            } catch(e) {}
-            
-            const content = btoa(unescape(encodeURIComponent(jsonStr)));
-            const body = {
-                message: `Добавлен бэкап ${filename}`,
-                content: content,
-                branch: "main"
-            };
-            if (sha) body.sha = sha;
-            
-            const response = await fetch(url, {
-                method: "PUT",
-                headers: { "Authorization": `token ${githubToken}`, "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-            if (response.ok) {
-                alert("✅ Бэкап сохранён в GitHub");
-            } else {
-                const err = await response.json();
-                alert("❌ Ошибка GitHub: " + (err.message || "неизвестная"));
+            const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+            if (checkRes.ok) {
+                const data = await checkRes.json();
+                sha = data.sha;
             }
-        } catch(e) {
-            alert("❌ Ошибка сети: " + e.message);
+        } catch(e) {}
+        
+        const content = btoa(unescape(encodeURIComponent(jsonStr)));
+        const body = {
+            message: `Обновлён бэкап ${filename}`,
+            content: content,
+            branch: "main"
+        };
+        if (sha) body.sha = sha; // Если файл есть — обновляем
+        
+        const response = await fetch(url, {
+            method: "PUT",
+            headers: { "Authorization": `token ${githubToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        if (response.ok) {
+            alert("✅ Бэкап сохранён в GitHub (memory.json обновлён)");
+        } else {
+            const err = await response.json();
+            alert("❌ Ошибка GitHub: " + (err.message || "неизвестная"));
         }
+    } catch(e) {
+        alert("❌ Ошибка сети: " + e.message);
     }
+}
 
     async function listBackupsFromGitHub() {
         if (!githubToken) { alert("❌ Сначала сохраните GitHub токен"); return []; }
