@@ -1,0 +1,13 @@
+{
+  "chatHistory": [],
+  "gdd": "",
+  "chatLog": [
+    {
+      "role": "system",
+      "text": "Чат очищен.",
+      "senderName": "Система"
+    }
+  ],
+  "timestamp": "2026-06-15T13:35:11.798Z",
+  "version": "0.5"
+}
