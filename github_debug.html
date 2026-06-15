@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Отладчик GitHub API</title>
+    <style>
+        body { background: #1a0b10; color: #ffd0e0; font-family: monospace; padding: 20px; }
+        pre { background: #2d1a24; padding: 12px; border-radius: 16px; overflow-x: auto; }
+        button { background: #b13e6b; border: none; color: white; padding: 8px 16px; border-radius: 30px; margin: 8px 0; }
+        input { width: 100%; padding: 8px; margin: 8px 0; border-radius: 30px; border: none; background: #2d1a24; color: white; }
+        .success { color: #8bc34a; }
+        .error { color: #ff8a80; }
+    </style>
+</head>
+<body>
+    <h2>🐞 Отладчик GitHub API</h2>
+    <p>Вставь токен (начинается на ghp_) и нажми кнопку.</p>
+    <input type="password" id="token" placeholder="ghp_...">
+    <button id="run">🔍 Проверить</button>
+    <pre id="output">Результат появится здесь...</pre>
+
+    <script>
+        document.getElementById('run').onclick = async () => {
+            const token = document.getElementById('token').value.trim();
+            if (!token) { alert("Вставь токен"); return; }
+            const output = document.getElementById('output');
+            output.innerText = "⏳ Проверяем...\n";
+            
+            const REPO_OWNER = "ArchangelGamess";
+            const REPO_NAME = "dipsi";
+            
+            async function test(url, desc) {
+                try {
+                    const res = await fetch(url, {
+                        headers: { 'Authorization': `token ${token}` }
+                    });
+                    const status = res.status;
+                    let body = "";
+                    try { body = JSON.stringify(await res.json(), null, 2); } catch(e) { body = await res.text(); }
+                    output.innerText += `\n${desc}\nСтатус: ${status}\nОтвет: ${body}\n${'='.repeat(50)}\n`;
+                    return { ok: res.ok, status, body };
+                } catch(e) {
+                    output.innerText += `\n${desc}\nОШИБКА: ${e.message}\n${'='.repeat(50)}\n`;
+                    return { ok: false, error: e.message };
+                }
+            }
+            
+            output.innerText += `🔍 Проверяем репозиторий: ${REPO_OWNER}/${REPO_NAME}\n`;
+            await test(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`, "1. Получение информации о репозитории");
+            await test(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/backups`, "2. Проверка папки backups");
+            await test(`https://api.github.com/user/repos`, "3. Список твоих репозиториев (проверка токена)");
+            
+            output.innerText += `\n✅ Готово. Если в п.3 пустой массив — токен не имеет прав repo.\n`;
+        };
+    </script>
+</body>
+</html>
