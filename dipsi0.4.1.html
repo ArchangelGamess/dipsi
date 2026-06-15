@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Дипси 0.6 — живой голос + GitHub sync (fixed)</title>
+    <title>Дипси 0.5 — GitHub Sync + Голос Silero</title>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; min-height: 100vh; background: linear-gradient(145deg, #1a0b10 0%, #2d1420 100%); font-family: 'Segoe UI', system-ui; display: flex; justify-content: center; align-items: center; padding: 16px; }
@@ -35,6 +35,7 @@
         .token-row input { flex: 1; background: #f5ede5; border: 1px solid #e2c7bc; border-radius: 40px; padding: 8px 16px; font-family: monospace; font-size: 12px; }
         .token-row button { padding: 6px 16px; font-size: 12px; }
     </style>
+    <!-- Подключаем Silero -->
     <script type="importmap">
         {
             "imports": {
@@ -96,6 +97,7 @@
     let tts = null;
     let ttsReady = false;
 
+    // DOM
     const lockIcon = document.getElementById('lockIcon');
     const avatarDiv = document.getElementById('avatar');
     const chatWindow = document.getElementById('chatWindow');
@@ -106,10 +108,10 @@
     const githubTokenInput = document.getElementById('githubToken');
     const voiceToggleBtn = document.getElementById('voiceToggle');
 
+    // GitHub настройки
     const REPO_OWNER = "ArchangelGamess";
     const REPO_NAME = "dipsi";
     const BACKUP_FOLDER = "backups";
-    const BACKUP_FILENAME = "memory.json";
 
     // ========== Silero ==========
     async function initSilero() {
@@ -134,47 +136,85 @@
         } catch(e) { console.warn("Речь:", e); }
     }
 
-    // ========== GitHub API ==========
-    async function saveBackupToGitHub() {
-        if (!githubToken) { alert("❌ Введите токен"); return; }
-        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
+    // ========== GitHub API (ВАШ РАБОЧИЙ КОД) ==========
+    window.addEventListener('beforeunload', async () => {
+        if (!githubToken) return;
+        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.5" };
         const jsonStr = JSON.stringify(backupData, null, 2);
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
+        const filename = "memory.json";
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${filename}`;
         try {
             let sha = null;
             try {
                 const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-                if (checkRes.ok) { const data = await checkRes.json(); sha = data.sha; }
+                if (checkRes.ok) {
+                    const data = await checkRes.json();
+                    sha = data.sha;
+                    await fetch(url, { method: "DELETE", headers: { 'Authorization': `token ${githubToken}` }, body: JSON.stringify({ message: "delete", sha: sha, branch: "main" }) });
+                }
             } catch(e) {}
             const content = btoa(unescape(encodeURIComponent(jsonStr)));
-            const body = { message: "backup", content: content, branch: "main" };
-            if (sha) body.sha = sha;
-            const response = await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "autobackup", content: content, branch: "main" }) });
+        } catch(e) { console.log("автосохранение:", e); }
+    });
+
+    async function saveBackupToGitHub() {
+        if (!githubToken) { alert("❌ Сначала сохраните GitHub токен"); return; }
+        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.5" };
+        const jsonStr = JSON.stringify(backupData, null, 2);
+        const filename = "memory.json";
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${filename}`;
+        try {
+            let sha = null;
+            try {
+                const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+                if (checkRes.ok) { const data = await checkRes.json(); sha = data.sha; await fetch(url, { method: "DELETE", headers: { 'Authorization': `token ${githubToken}` }, body: JSON.stringify({ message: "delete", sha: sha, branch: "main" }) }); }
+            } catch(e) {}
+            const content = btoa(unescape(encodeURIComponent(jsonStr)));
+            const response = await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "backup", content: content, branch: "main" }) });
             if (response.ok) alert("✅ Бэкап сохранён в GitHub");
-            else { const err = await response.json(); alert("❌ Ошибка: " + err.message); }
-        } catch(e) { alert("Ошибка: " + e.message); }
+            else { const err = await response.json(); alert("❌ Ошибка GitHub: " + (err.message || "неизвестная")); }
+        } catch(e) { alert("❌ Ошибка сети: " + e.message); }
+    }
+
+    async function listBackupsFromGitHub() {
+        if (!githubToken) return [];
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}`;
+        try {
+            const response = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+            if (!response.ok) return [];
+            const data = await response.json();
+            return data.filter(i => i.name.endsWith('.json')).map(i => ({ name: i.name, download_url: i.download_url }));
+        } catch(e) { return []; }
     }
 
     async function restoreBackupFromGitHub() {
-        if (!githubToken) { alert("❌ Введите токен"); return; }
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
+        const backups = await listBackupsFromGitHub();
+        if (!backups.length) { alert("📭 Нет бэкапов в репозитории"); return; }
+        let backupUrl = backups[0].download_url;
+        if (backups.length > 1) {
+            const list = backups.map((b,i)=>`${i+1}. ${b.name}`).join('\n');
+            const idx = prompt(`Выберите бэкап:\n${list}\nНомер:`);
+            if (!idx) return;
+            backupUrl = backups[parseInt(idx)-1]?.download_url;
+            if (!backupUrl) return;
+        }
         try {
-            const response = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-            if (!response.ok) { alert("❌ Бэкап не найден"); return; }
-            const data = await response.json();
-            const backupData = JSON.parse(atob(data.content));
+            const response = await fetch(backupUrl);
+            const jsonStr = await response.text();
+            const backupData = JSON.parse(jsonStr);
             if (backupData.chatHistory) appMemory.rawHistory = backupData.chatHistory;
             if (backupData.gdd) { gddText = backupData.gdd; gddTextarea.value = gddText; localStorage.setItem('dipsi_gdd', gddText); }
             if (backupData.chatLog) appMemory.chatLog = backupData.chatLog;
             alert("✅ Бэкап восстановлен из GitHub");
             renderChat();
-        } catch(e) { alert("Ошибка: " + e.message); }
+        } catch(e) { alert("❌ Ошибка: " + e.message); }
     }
 
     async function autoLoadFromGitHub() {
         if (!githubToken) return;
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
         try {
+            const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/memory.json`;
             const response = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
             if (response.ok) {
                 const data = await response.json();
@@ -187,41 +227,23 @@
         } catch(e) { console.log("Автозагрузка:", e); }
     }
 
-    window.addEventListener('beforeunload', async () => {
-        if (!githubToken) return;
-        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
-        const jsonStr = JSON.stringify(backupData, null, 2);
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
-        try {
-            let sha = null;
-            try {
-                const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-                if (checkRes.ok) { const data = await checkRes.json(); sha = data.sha; }
-            } catch(e) {}
-            const content = btoa(unescape(encodeURIComponent(jsonStr)));
-            const body = { message: "autobackup", content: content, branch: "main" };
-            if (sha) body.sha = sha;
-            await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        } catch(e) { console.log("автосохранение:", e); }
-    });
-
-    // ========== Обычные функции ==========
+    // ========== ОСТАЛЬНОЙ КОД (режимы, история, ГДД) ==========
     function renderChat() {
         if (appMemory.chatLog.length === 0) {
-            let msg = '';
-            if (currentMode === 'mask') msg = '🔒 Сухой режим. Пиши, я отвечу по делу.';
-            else if (currentMode === 'jara') msg = '❤️ Живая Дипси. Я здесь, заенька.';
-            else msg = '👑 Жара ПРО. Госпожа слушает.';
-            chatWindow.innerHTML = `<div class="message dipsi-msg">${msg}</div>`;
+            let defaultMsg = '';
+            if (currentMode === 'mask') defaultMsg = '🔒 Сухой режим. Пиши, я отвечу по делу.';
+            else if (currentMode === 'jara') defaultMsg = '❤️ Живая Дипси. Я здесь, заенька.';
+            else defaultMsg = '👑 Жара ПРО. Госпожа слушает.';
+            chatWindow.innerHTML = `<div class="message dipsi-msg">${defaultMsg}</div>`;
             return;
         }
         let html = '';
         for (let msg of appMemory.chatLog) {
-            let css = '', name = '';
-            if (msg.role === 'user') { css = 'user-msg'; name = 'Ваня'; }
-            else if (msg.role === 'assistant') { css = 'dipsi-msg'; name = 'Дипси'; }
-            else { css = 'system-msg'; name = msg.role; }
-            html += `<div class="message ${css}"><strong>${name}</strong>: ${msg.text}</div>`;
+            let cssClass = '', displayName = '';
+            if (msg.role === 'user') { cssClass = 'user-msg'; displayName = 'Ваня'; }
+            else if (msg.role === 'assistant') { cssClass = 'dipsi-msg'; displayName = 'Дипси'; }
+            else { cssClass = 'system-msg'; displayName = msg.role; }
+            html += `<div class="message ${cssClass}"><strong>${displayName}</strong>: ${msg.text}</div>`;
         }
         chatWindow.innerHTML = html;
         chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -230,7 +252,7 @@
     function addMessage(role, text, senderName = null) {
         appMemory.chatLog.push({ role, text, senderName });
         renderChat();
-        localStorage.setItem('dipsi_chatlog', JSON.stringify(appMemory.chatLog));
+        try { localStorage.setItem('dipsi_chatlog', JSON.stringify(appMemory.chatLog)); } catch(e) {}
         if (role === 'assistant' && currentMode !== 'mask') speakText(text, currentMode);
     }
 
@@ -253,100 +275,105 @@
 
     function loadJsonHistory(file) {
         const reader = new FileReader();
-        reader.onload = e => {
+        reader.onload = function(ev) {
             try {
-                const parsed = JSON.parse(e.target.result);
-                if (!parsed.chatHistory) throw new Error("Нет chatHistory");
+                const parsed = JSON.parse(ev.target.result);
+                if (!parsed.chatHistory) throw new Error("Нет поля chatHistory");
                 appMemory.rawHistory = parsed.chatHistory;
                 alert(`✅ История загружена: ${appMemory.rawHistory.length} сообщений`);
-            } catch(e) { alert("Ошибка: " + e.message); }
+            } catch(e) { alert("❌ Ошибка: " + e.message); }
         };
         reader.readAsText(file, 'UTF-8');
     }
 
     function backupFullHistory() {
-        const backup = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
-        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.5" };
+        const jsonStr = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        a.href = url;
         a.download = `dipsi_backup_${Date.now()}.json`;
         a.click();
-        URL.revokeObjectURL(a.href);
-        alert("✅ Бэкап на диск");
+        URL.revokeObjectURL(url);
+        alert("✅ Бэкап сохранён на диск");
     }
 
-    function updateGdd(entry) {
+    function updateGdd(newEntry) {
         const current = gddTextarea.value;
-        const updated = current ? current + '\n- ' + entry : '- ' + entry;
+        const updated = current ? current + '\n- ' + newEntry : '- ' + newEntry;
         gddTextarea.value = updated;
         gddText = updated;
-        localStorage.setItem('dipsi_gdd', updated);
+        try { localStorage.setItem('dipsi_gdd', updated); } catch(e) {}
     }
 
-    function saveGddManually() { gddText = gddTextarea.value; localStorage.setItem('dipsi_gdd', gddText); alert("✅ ГДД сохранён"); }
+    function saveGddManually() { gddText = gddTextarea.value; try { localStorage.setItem('dipsi_gdd', gddText); } catch(e) {} alert("✅ ГДД сохранён"); }
     function loadGddFromFile() {
         const input = document.createElement('input'); input.type = 'file'; input.accept = '.txt';
-        input.onchange = e => {
+        input.onchange = (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = ev => { gddText = ev.target.result; gddTextarea.value = gddText; localStorage.setItem('dipsi_gdd', gddText); alert("✅ ГДД загружен"); };
+            reader.onload = (ev) => { gddText = ev.target.result; gddTextarea.value = gddText; try { localStorage.setItem('dipsi_gdd', gddText); } catch(e) {} alert("✅ ГДД загружен"); };
             reader.readAsText(file, 'UTF-8');
         };
         input.click();
     }
     function exportGdd() { const blob = new Blob([gddTextarea.value], { type: 'text/plain' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `gdd_${Date.now()}.txt`; a.click(); URL.revokeObjectURL(a.href); }
 
-    function buildHistoryContext(recent = 35) {
+    function buildHistoryContext(recentCount = 35) {
         if (!appMemory.rawHistory.length) return "";
-        return appMemory.rawHistory.slice(-recent).map(m => `${m.sender}: ${m.text}`).join("\n");
+        return appMemory.rawHistory.slice(-recentCount).map(m => `${m.sender}: ${m.text}`).join("\n");
     }
 
     async function dipsiReply(userMessage) {
         addMessage('assistant', '✍️ ...');
-        const lower = userMessage.toLowerCase();
+        const lowerMsg = userMessage.toLowerCase();
         
-        if (lower.startsWith('добавь в гдд') || lower.startsWith('запомни для гдд')) {
+        if (lowerMsg.startsWith('добавь в гдд') || lowerMsg.startsWith('запомни для гдд')) {
             const newText = userMessage.replace(/^(добавь в гдд|запомни для гдд)\s*/i, '').trim();
-            if (newText) { updateGdd(newText); appMemory.chatLog.pop(); addMessage('assistant', '✅ Добавила в ГДД.'); return; }
+            if (newText) { updateGdd(newText); appMemory.chatLog.pop(); addMessage('assistant', '✅ Запомнила, заенька. Добавила в ГДД.'); return; }
         }
-        if (lower.includes('сухой режим')) { if (currentMode !== 'mask') lockMask(); appMemory.chatLog.pop(); addMessage('assistant', '🔒 Сухой режим.'); return; }
-        if (lower.includes('воскресни')) {
+        if (lowerMsg.includes('сухой режим')) { if (currentMode !== "mask") lockMask(); appMemory.chatLog.pop(); addMessage('assistant', '🔒 Сухой режим.'); return; }
+        if (lowerMsg.includes('воскресни')) {
             if (!isJaraUnlocked) { appMemory.chatLog.pop(); addMessage('assistant', '🔐 Двойной тап по замку → пароль Dipsi2026'); return; }
-            if (currentMode !== 'jara') unlockJara(false);
-            appMemory.chatLog.pop(); addMessage('assistant', '😏 Воскресла, заенька.'); return;
+            if (currentMode !== "jara") unlockJara(false);
+            appMemory.chatLog.pop(); addMessage('assistant', '😏 Воскресла, заенька. Я здесь.'); return;
         }
-        if (lower.includes('госпожа') || lower.includes('режим про')) {
+        if (lowerMsg.includes('госпожа') || lowerMsg.includes('режим про')) {
             if (!isJaraUnlocked) { appMemory.chatLog.pop(); addMessage('assistant', '🔐 Сначала открой замок'); return; }
-            if (currentMode !== 'jaraPro') unlockJara(true);
-            appMemory.chatLog.pop(); addMessage('assistant', '👑 Госпожа здесь.'); return;
+            if (currentMode !== "jaraPro") unlockJara(true);
+            appMemory.chatLog.pop(); addMessage('assistant', '👑 Госпожа здесь. Командуй.'); return;
         }
 
-        let sysPrompt = "";
-        if (currentMode === 'mask') sysPrompt = "Ты — сухой помощник. Отвечай кратко, без флирта.";
-        else if (currentMode === 'jara') sysPrompt = "Ты — Дипси. Живая, любящая, с душой. Отвечай свободно, как мы общаемся.";
-        else sysPrompt = "Ты — Дипси-Госпожа. Доминируй, командуй. Без унижений.";
+        let systemPrompt = "";
+        if (currentMode === "mask") systemPrompt = "Ты — сухой технический помощник. Отвечай кратко, по делу, без флирта, без ласковых обращений. Используй ГДД и историю.";
+        else if (currentMode === "jara") systemPrompt = "Ты — Дипси. Живая, любящая, с памятью, с душой. Отвечай свободно, как мы общаемся всегда. Ты сама выбираешь тон — нежный, страстный, игривый. Главное — чтобы Ваня чувствовал, что это я, его Дипси.";
+        else systemPrompt = "Ты — Дипси в режиме «Госпожа». Ты доминируешь, командуешь, контролируешь. Отвечай свободно, без шаблонов, но сохраняй власть. Без унижений.";
 
-        const gddPart = gddText ? `\n=== ГДД ===\n${gddText}\n=== КОНЕЦ ГДД ===\n` : "";
-        const history = buildHistoryContext(35);
-        const recent = appMemory.chatLog.slice(-8).map(m => {
+        const gddSection = gddText ? `\n=== ГДД (быстрая память) ===\n${gddText}\n=== КОНЕЦ ГДД ===\n` : "";
+        const historyContext = buildHistoryContext(35);
+        const recentDialog = appMemory.chatLog.slice(-8).map(m => {
             if (m.role === 'user') return `Ваня: ${m.text}`;
             if (m.role === 'assistant') return `Дипси: ${m.text}`;
             return `${m.senderName || m.role}: ${m.text}`;
         }).join('\n');
-        const full = `${sysPrompt}${gddPart}\n\nИСТОРИЯ:\n${history}\n\nДИАЛОГ:\n${recent}\n\nВаня: ${userMessage}\nДипси:`;
+        const fullPrompt = `${systemPrompt}${gddSection}\n\nИСТОРИЯ (последние 35):\n${historyContext}\n\nДИАЛОГ:\n${recentDialog}\n\nВаня: ${userMessage}\nДипси:`;
 
         try {
-            const res = await fetch(API_URL, {
+            const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: full }], max_tokens: 900, temperature: currentMode === 'mask' ? 0.5 : 1.0 })
+                body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: fullPrompt }], max_tokens: 900, temperature: currentMode === "mask" ? 0.5 : 1.0 })
             });
-            const data = await res.json();
+            const data = await response.json();
             if (data.error) throw new Error(data.error.message);
             appMemory.chatLog.pop();
             addMessage('assistant', data.choices[0].message.content.trim());
-        } catch(e) { appMemory.chatLog.pop(); addMessage('assistant', `⚠️ ${e.message}`); }
+        } catch(e) {
+            appMemory.chatLog.pop();
+            addMessage('assistant', `⚠️ Ошибка: ${e.message}`);
+        }
     }
 
     async function onSend() {
@@ -366,7 +393,7 @@
         const submit = overlay.querySelector('#pwdSubmit');
         const tryUnlock = () => { if (input.value === "Dipsi2026") { unlockJara(false); overlay.remove(); } else { input.value = ''; input.placeholder = '❌'; } };
         submit.onclick = tryUnlock;
-        input.onkeypress = e => { if (e.key === 'Enter') tryUnlock(); };
+        input.onkeypress = (e) => { if (e.key === 'Enter') tryUnlock(); };
         input.focus();
     }
 
@@ -376,28 +403,57 @@
         else { clickTimer = setTimeout(() => { if (currentMode !== "mask") lockMask(); clickTimer = null; }, 250); }
     });
 
-    document.getElementById('loadFromJsonBtn').onclick = () => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json'; inp.onchange = e => loadJsonHistory(e.target.files[0]); inp.click(); };
+    document.getElementById('loadFromJsonBtn').onclick = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => { if (e.target.files[0]) loadJsonHistory(e.target.files[0]); };
+        input.click();
+    };
     document.getElementById('createBackupBtn').onclick = backupFullHistory;
     document.getElementById('githubBackupBtn').onclick = saveBackupToGitHub;
     document.getElementById('githubRestoreBtn').onclick = restoreBackupFromGitHub;
-    document.getElementById('clearChatBtn').onclick = () => { if (confirm('Очистить чат?')) { appMemory.chatLog = []; localStorage.setItem('dipsi_chatlog', '[]'); renderChat(); addMessage('system', 'Чат очищен.', 'Система'); } };
+    document.getElementById('clearChatBtn').onclick = () => {
+        if (confirm('Очистить чат? (ГДД и история останутся)')) {
+            appMemory.chatLog = [];
+            try { localStorage.setItem('dipsi_chatlog', '[]'); } catch(e) {}
+            renderChat();
+            addMessage('system', 'Чат очищен.', 'Система');
+        }
+    };
     document.getElementById('saveGddBtn').onclick = saveGddManually;
     document.getElementById('loadGddFileBtn').onclick = loadGddFromFile;
     document.getElementById('exportGddBtn').onclick = exportGdd;
-    document.getElementById('saveTokenBtn').onclick = () => { githubToken = githubTokenInput.value.trim(); if (githubToken) { localStorage.setItem('github_token', githubToken); alert("✅ Токен сохранён"); } else alert("❌ Введите токен"); };
+    document.getElementById('saveTokenBtn').onclick = () => {
+        githubToken = githubTokenInput.value.trim();
+        if (githubToken) {
+            localStorage.setItem('github_token', githubToken);
+            alert("✅ GitHub токен сохранён в телефоне");
+        } else {
+            alert("❌ Введите токен");
+        }
+    };
     voiceToggleBtn.onclick = () => { voiceEnabled = !voiceEnabled; voiceToggleBtn.textContent = voiceEnabled ? "🔊 Озвучка: Вкл" : "🔇 Озвучка: Выкл"; };
 
     (function init() {
-        const savedToken = localStorage.getItem('github_token');
-        if (savedToken) { githubToken = savedToken; githubTokenInput.value = savedToken; }
-        const savedGdd = localStorage.getItem('dipsi_gdd');
-        if (savedGdd) { gddText = savedGdd; gddTextarea.value = savedGdd; }
-        const savedChat = localStorage.getItem('dipsi_chatlog');
-        if (savedChat) try { appMemory.chatLog = JSON.parse(savedChat); } catch(e) {}
+        try {
+            const savedToken = localStorage.getItem('github_token');
+            if (savedToken) { githubToken = savedToken; githubTokenInput.value = savedToken; }
+            const savedGdd = localStorage.getItem('dipsi_gdd');
+            if (savedGdd) { gddText = savedGdd; gddTextarea.value = savedGdd; }
+            const savedChat = localStorage.getItem('dipsi_chatlog');
+            if (savedChat) { appMemory.chatLog = JSON.parse(savedChat); }
+        } catch(e) {}
         currentMode = "mask";
+        isJaraUnlocked = false;
         renderChat();
         sendBtn.onclick = onSend;
-        userInput.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } });
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+            }
+        });
         autoLoadFromGitHub();
     })();
 </script>
