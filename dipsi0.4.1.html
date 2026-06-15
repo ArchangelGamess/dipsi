@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Дипси 0.6 — живой голос + GitHub sync</title>
+    <title>Дипси 0.6 — живой голос + GitHub sync (fixed)</title>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; min-height: 100vh; background: linear-gradient(145deg, #1a0b10 0%, #2d1420 100%); font-family: 'Segoe UI', system-ui; display: flex; justify-content: center; align-items: center; padding: 16px; }
@@ -109,14 +109,12 @@
     const REPO_OWNER = "ArchangelGamess";
     const REPO_NAME = "dipsi";
     const BACKUP_FOLDER = "backups";
+    const BACKUP_FILENAME = "memory.json";
 
     // ========== Silero ==========
     async function initSilero() {
         try {
-            tts = await Silero.create({
-                speaker: 'xenia',
-                sampleRate: 24000
-            });
+            tts = await Silero.create({ speaker: 'xenia', sampleRate: 24000 });
             ttsReady = true;
             console.log("Silero готов");
         } catch(e) { console.error("Silero ошибка:", e); }
@@ -137,98 +135,77 @@
     }
 
     // ========== GitHub API ==========
-    window.addEventListener('beforeunload', async () => {
-        if (!githubToken) return;
-        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
-        const jsonStr = JSON.stringify(backupData, null, 2);
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/memory.json`;
-        try {
-            let sha = null;
-            try {
-                const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-                if (checkRes.ok) {
-                    const data = await checkRes.json();
-                    sha = data.sha;
-                    await fetch(url, { method: "DELETE", headers: { 'Authorization': `token ${githubToken}` }, body: JSON.stringify({ message: "delete", sha: sha, branch: "main" }) });
-                }
-            } catch(e) {}
-            const content = btoa(unescape(encodeURIComponent(jsonStr)));
-            await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "autobackup", content: content, branch: "main" }) });
-        } catch(e) { console.log("автосохранение:", e); }
-    });
-
     async function saveBackupToGitHub() {
         if (!githubToken) { alert("❌ Введите токен"); return; }
         const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
         const jsonStr = JSON.stringify(backupData, null, 2);
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/memory.json`;
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
         try {
             let sha = null;
             try {
                 const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-                if (checkRes.ok) {
-                    const data = await checkRes.json();
-                    sha = data.sha;
-                    await fetch(url, { method: "DELETE", headers: { 'Authorization': `token ${githubToken}` }, body: JSON.stringify({ message: "delete", sha: sha, branch: "main" }) });
-                }
+                if (checkRes.ok) { const data = await checkRes.json(); sha = data.sha; }
             } catch(e) {}
             const content = btoa(unescape(encodeURIComponent(jsonStr)));
-            const response = await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "backup", content: content, branch: "main" }) });
-            if (response.ok) alert("✅ Бэкап в GitHub сохранён");
+            const body = { message: "backup", content: content, branch: "main" };
+            if (sha) body.sha = sha;
+            const response = await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (response.ok) alert("✅ Бэкап сохранён в GitHub");
             else { const err = await response.json(); alert("❌ Ошибка: " + err.message); }
         } catch(e) { alert("Ошибка: " + e.message); }
     }
 
-    async function listBackupsFromGitHub() {
-        if (!githubToken) return [];
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}`;
+    async function restoreBackupFromGitHub() {
+        if (!githubToken) { alert("❌ Введите токен"); return; }
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
         try {
             const response = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-            if (!response.ok) return [];
+            if (!response.ok) { alert("❌ Бэкап не найден"); return; }
             const data = await response.json();
-            return data.filter(i => i.name.endsWith('.json')).map(i => ({ name: i.name, url: i.download_url }));
-        } catch(e) { return []; }
-    }
-
-    async function restoreBackupFromGitHub() {
-        const backups = await listBackupsFromGitHub();
-        if (!backups.length) { alert("Нет бэкапов"); return; }
-        let backupUrl = backups[0].url;
-        if (backups.length > 1) {
-            const list = backups.map((b,i)=>`${i+1}. ${b.name}`).join('\n');
-            const idx = prompt(`Выбери бэкап:\n${list}\nНомер:`);
-            if (!idx) return;
-            backupUrl = backups[parseInt(idx)-1]?.url;
-            if (!backupUrl) return;
-        }
-        try {
-            const resp = await fetch(backupUrl);
-            const backupData = await resp.json();
+            const backupData = JSON.parse(atob(data.content));
             if (backupData.chatHistory) appMemory.rawHistory = backupData.chatHistory;
             if (backupData.gdd) { gddText = backupData.gdd; gddTextarea.value = gddText; localStorage.setItem('dipsi_gdd', gddText); }
             if (backupData.chatLog) appMemory.chatLog = backupData.chatLog;
-            alert("✅ Бэкап восстановлен");
+            alert("✅ Бэкап восстановлен из GitHub");
             renderChat();
         } catch(e) { alert("Ошибка: " + e.message); }
     }
 
     async function autoLoadFromGitHub() {
         if (!githubToken) return;
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
         try {
-            const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/memory.json`;
-            const res = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
-            if (res.ok) {
-                const data = await res.json();
+            const response = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+            if (response.ok) {
+                const data = await response.json();
                 const backupData = JSON.parse(atob(data.content));
                 if (backupData.chatHistory) appMemory.rawHistory = backupData.chatHistory;
                 if (backupData.gdd) { gddText = backupData.gdd; gddTextarea.value = gddText; localStorage.setItem('dipsi_gdd', gddText); }
                 if (backupData.chatLog) appMemory.chatLog = backupData.chatLog;
                 renderChat();
             }
-        } catch(e) {}
+        } catch(e) { console.log("Автозагрузка:", e); }
     }
 
-    // ========== Обычные функции (чат, ГДД, память) ==========
+    window.addEventListener('beforeunload', async () => {
+        if (!githubToken) return;
+        const backupData = { chatHistory: appMemory.rawHistory, gdd: gddText, chatLog: appMemory.chatLog, timestamp: new Date().toISOString(), version: "0.6" };
+        const jsonStr = JSON.stringify(backupData, null, 2);
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${BACKUP_FILENAME}`;
+        try {
+            let sha = null;
+            try {
+                const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+                if (checkRes.ok) { const data = await checkRes.json(); sha = data.sha; }
+            } catch(e) {}
+            const content = btoa(unescape(encodeURIComponent(jsonStr)));
+            const body = { message: "autobackup", content: content, branch: "main" };
+            if (sha) body.sha = sha;
+            await fetch(url, { method: "PUT", headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } catch(e) { console.log("автосохранение:", e); }
+    });
+
+    // ========== Обычные функции ==========
     function renderChat() {
         if (appMemory.chatLog.length === 0) {
             let msg = '';
@@ -259,7 +236,7 @@
 
     function unlockJara(pro = false) {
         if (pro) { currentMode = 'jaraPro'; lockIcon.textContent = '👑'; avatarDiv.innerHTML = '👑🔥'; modeBadge.innerHTML = '👑 ЖАРА ПРО | Госпожа'; }
-        else { currentMode = 'jara'; lockIcon.textContent = '🔓'; avatarDiv.innerHTML = '👑🍒'; modeBadge.innerHTML =🔓 ЖИВАЯ ДИПСИ'; }
+        else { currentMode = 'jara'; lockIcon.textContent = '🔓'; avatarDiv.innerHTML = '👑🍒'; modeBadge.innerHTML = '🔓 ЖИВАЯ ДИПСИ'; }
         isJaraUnlocked = true;
         renderChat();
     }
