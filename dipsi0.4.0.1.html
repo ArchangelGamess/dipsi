@@ -256,27 +256,34 @@
         version: "0.5"
     };
     const jsonStr = JSON.stringify(backupData, null, 2);
-    const filename = "memory.json"; // ← ТВОЁ ИМЯ ФАЙЛА
+    const filename = "memory.json";
     const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}/${filename}`;
     
     try {
-        // Получаем SHA существующего файла (если он есть)
+        // Пытаемся получить SHA и удалить старый файл
         let sha = null;
         try {
             const checkRes = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
             if (checkRes.ok) {
                 const data = await checkRes.json();
                 sha = data.sha;
+                // Удаляем старый файл
+                await fetch(url, {
+                    method: "DELETE",
+                    headers: { "Authorization": `token ${githubToken}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: "Удаление перед перезаписью", sha: sha, branch: "main" })
+                });
+                console.log("Старый файл удалён");
             }
-        } catch(e) {}
+        } catch(e) { console.log("Файла не было или ошибка:", e); }
         
+        // Создаём новый файл
         const content = btoa(unescape(encodeURIComponent(jsonStr)));
         const body = {
-            message: `Обновлён бэкап ${filename}`,
+            message: `Перезаписан бэкап ${filename}`,
             content: content,
             branch: "main"
         };
-        if (sha) body.sha = sha; // Если файл есть — обновляем
         
         const response = await fetch(url, {
             method: "PUT",
@@ -284,7 +291,7 @@
             body: JSON.stringify(body)
         });
         if (response.ok) {
-            alert("✅ Бэкап сохранён в GitHub (memory.json обновлён)");
+            alert("✅ Бэкап перезаписан в GitHub (memory.json)");
         } else {
             const err = await response.json();
             alert("❌ Ошибка GitHub: " + (err.message || "неизвестная"));
@@ -293,7 +300,6 @@
         alert("❌ Ошибка сети: " + e.message);
     }
 }
-
     async function listBackupsFromGitHub() {
         if (!githubToken) { alert("❌ Сначала сохраните GitHub токен"); return []; }
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${BACKUP_FOLDER}`;
